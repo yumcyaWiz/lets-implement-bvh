@@ -2,6 +2,7 @@
 #define _BVH_H
 
 #include "bvh/optimized-bvh.hpp"
+#include "bvh/qbvh.hpp"
 #include "bvh/simple-bvh.hpp"
 
 #endif
