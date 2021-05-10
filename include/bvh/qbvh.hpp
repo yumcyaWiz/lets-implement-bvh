@@ -22,11 +22,10 @@ class QBVH {
     float ymax[4];
     float zmin[4];
     float zmax[4];
-    int child
-        [4];  // 子ノードへのインデックス(先頭1bitで葉ノードかどうかを表し、残り31bitにノード
-              // or leavesへのインデックス)
-    int axisTop;    // ノードの分割軸
-    int axisLeft;   // 左ノードの分割軸
+    int child[4];  // 子ノードへのインデックス(先頭1bitで葉ノードかどうかを表し、残り4bitにPrimitive数,
+                   // 残り27bitにprimIndicesへのオフセット)
+    int axisTop;   // ノードの分割軸
+    int axisLeft;  // 左ノードの分割軸
     int axisRight;  // 右ノードの分割軸
   };
 
@@ -203,8 +202,6 @@ class QBVH {
   }
 
   // 再帰的にBVHのtraverseを行う
-  // NOTE:
-  // 再帰なし版も実装してみたがこっちの方が早かった(simple-renderingで0.2秒差)
   bool intersectNode(int nodeIdx, const Ray& ray, const Vec3& dirInv,
                      const int dirInvSign[3], IntersectInfo& info) const {
     return false;
