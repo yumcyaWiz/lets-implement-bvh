@@ -1,5 +1,7 @@
 #ifndef _QBVH_H
 #define _QBVH_H
+#include <immintrin.h>
+
 #include <numeric>
 #include <stack>
 #include <vector>
@@ -22,10 +24,11 @@ class QBVH {
     float ymax[4];
     float zmin[4];
     float zmax[4];
-    int child[4];  // 子ノードへのインデックス(先頭1bitで葉ノードかどうかを表し、残り4bitにPrimitive数,
-                   // 残り27bitにprimIndicesへのオフセット)
-    int axisTop;   // ノードの分割軸
-    int axisLeft;  // 左ノードの分割軸
+    int child
+        [4];  // 子ノードへのインデックス(先頭1bitで葉ノードかどうかを表し、残り4bitにPrimitive数,
+              // 残り27bitにprimIndicesへのオフセット)
+    int axisTop;    // ノードの分割軸
+    int axisLeft;   // 左ノードの分割軸
     int axisRight;  // 右ノードの分割軸
   };
 
@@ -199,6 +202,36 @@ class QBVH {
 
     // 子ノード4の部分木を配列に追加していく
     buildBVHNode(splitIdxRight, primEnd, bboxes, primIndices);
+  }
+
+  // SIMDでray-box intersectionを行う
+  static int intersectAABB(const __m128 orig[3], const __m128 dirInv[3],
+                           const int dirInvSign[3], const __m128 raytmin,
+                           const __m128 raytmax, const __m128 bounds[2][3]) {
+    // SIMD version of https://dl.acm.org/doi/abs/10.1145/1198555.1198748
+    __m128 tmin =
+        _mm_mul_ps(_mm_sub_ps(bounds[dirInvSign[0]][0], orig[0]), dirInv[0]);
+    __m128 tmax = _mm_mul_ps(_mm_sub_ps(bounds[1 - dirInvSign[0]][0], orig[0]),
+                             dirInv[0]);
+
+    tmin = _mm_min_ps(
+        tmin,
+        _mm_mul_ps(_mm_sub_ps(bounds[dirInvSign[1]][1], orig[1]), dirInv[1]));
+    tmax = _mm_max_ps(
+        tmax, _mm_mul_ps(_mm_sub_ps(bounds[1 - dirInvSign[1]][1], orig[1]),
+                         dirInv[1]));
+
+    tmin = _mm_min_ps(
+        tmin,
+        _mm_mul_ps(_mm_sub_ps(bounds[dirInvSign[2]][2], orig[2]), dirInv[2]));
+    tmax = _mm_max_ps(
+        tmax, _mm_mul_ps(_mm_sub_ps(bounds[1 - dirInvSign[2]][2], orig[2]),
+                         dirInv[2]));
+
+    const __m128 comp1 = _mm_cmp_ps(tmax, tmin, _CMP_GT_OQ);
+    const __m128 comp2 = _mm_and_ps(_mm_cmp_ps(tmin, raytmax, _CMP_LT_OQ),
+                                    _mm_cmp_ps(tmax, raytmin, _CMP_GT_OQ));
+    return _mm_movemask_ps(_mm_and_ps(comp1, comp2));
   }
 
   // 再帰的にBVHのtraverseを行う
