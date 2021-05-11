@@ -11,8 +11,6 @@
 class QBVH {
  private:
   std::vector<Triangle> primitives;  // Primitive(三角形)の配列
-  std::vector<int> primIndices;  // primitivesへのインデックスの配列.
-                                 // 分割時にはこれがソートされる
 
   // ノードを表す構造体
   // NOTE: 128ByteにAlignmentすることでキャッシュ効率を良くする
@@ -46,45 +44,38 @@ class QBVH {
   BVHStatistics stats;           // BVHの統計情報
 
   // 指定したPrimitiveを含むAABBを計算
-  static AABB computeAABB(int primStart, int primEnd,
-                          const std::vector<AABB>& bboxes,
-                          const std::vector<int>& primIndices) {
+  AABB computeAABB(int primStart, int primEnd) {
     AABB ret;
     for (int i = primStart; i < primEnd; ++i) {
-      const int primIdx = primIndices[i];
-      ret = mergeAABB(ret, bboxes[primIdx]);
+      ret = mergeAABB(ret, primitives[i].calcAABB());
     }
     return ret;
   }
 
   // 指定したPrimitiveの中心を含むAABBを計算
-  static AABB computeCentroidAABB(int primStart, int primEnd,
-                                  const std::vector<AABB>& bboxes,
-                                  const std::vector<int>& primIndices) {
+  AABB computeCentroidAABB(int primStart, int primEnd) {
     AABB ret;
     for (int i = primStart; i < primEnd; ++i) {
-      const int primIdx = primIndices[i];
-      ret = mergeAABB(ret, bboxes[primIdx].center());
+      ret = mergeAABB(ret, primitives[i].calcAABB().center());
     }
     return ret;
   }
 
   // AABBを等数分割する
-  void splitAABB(int primStart, int primEnd, const std::vector<AABB>& bboxes,
-                 std::vector<int>& primIndices, int& splitAxis, int& splitIdx) {
+  void splitAABB(int primStart, int primEnd, int& splitAxis, int& splitIdx) {
     // 分割用に各Primitiveの中心点を含むAABBを計算
     // NOTE: bboxをそのまま使ってしまうとsplitが失敗することが多い
-    const AABB splitAABB =
-        computeCentroidAABB(primStart, primEnd, bboxes, primIndices);
+    const AABB splitAABB = computeCentroidAABB(primStart, primEnd);
 
     // AABBの分割
     splitAxis = splitAABB.longestAxis();
     splitIdx = primStart + (primEnd - primStart) / 2;
-    std::nth_element(primIndices.begin() + primStart,
-                     primIndices.begin() + splitIdx,
-                     primIndices.begin() + primEnd, [&](int idx1, int idx2) {
-                       return bboxes[idx1].center()[splitAxis] <
-                              bboxes[idx2].center()[splitAxis];
+    std::nth_element(primitives.begin() + primStart,
+                     primitives.begin() + splitIdx,
+                     primitives.begin() + primEnd,
+                     [&](const auto& prim1, const auto& prim2) {
+                       return prim1.calcAABB().center()[splitAxis] <
+                              prim2.calcAABB().center()[splitAxis];
                      });
   }
 
@@ -109,31 +100,24 @@ class QBVH {
   }
 
   // 再帰的にBVHのノードを構築していく
-  void buildBVHNode(int primStart, int primEnd, const std::vector<AABB>& bboxes,
-                    std::vector<int>& primIndices) {
+  void buildBVHNode(int primStart, int primEnd) {
     // AABBの分割
     int splitAxisTop, splitIdxTop;
-    splitAABB(primStart, primEnd, bboxes, primIndices, splitAxisTop,
-              splitIdxTop);
+    splitAABB(primStart, primEnd, splitAxisTop, splitIdxTop);
 
     // 左AABBの分割
     int splitAxisLeft, splitIdxLeft;
-    splitAABB(primStart, splitIdxTop, bboxes, primIndices, splitAxisLeft,
-              splitIdxLeft);
+    splitAABB(primStart, splitIdxTop, splitAxisLeft, splitIdxLeft);
 
     // 右AABBの分割
     int splitAxisRight, splitIdxRight;
-    splitAABB(splitIdxTop, primEnd, bboxes, primIndices, splitAxisRight,
-              splitIdxRight);
+    splitAABB(splitIdxTop, primEnd, splitAxisRight, splitIdxRight);
 
     // 各子ノードのAABBの計算
-    const AABB bbox0 =
-        computeAABB(primStart, splitIdxLeft, bboxes, primIndices);
-    const AABB bbox1 =
-        computeAABB(splitIdxLeft, splitIdxTop, bboxes, primIndices);
-    const AABB bbox2 =
-        computeAABB(splitIdxTop, splitIdxRight, bboxes, primIndices);
-    const AABB bbox3 = computeAABB(splitIdxRight, primEnd, bboxes, primIndices);
+    const AABB bbox0 = computeAABB(primStart, splitIdxLeft);
+    const AABB bbox1 = computeAABB(splitIdxLeft, splitIdxTop);
+    const AABB bbox2 = computeAABB(splitIdxTop, splitIdxRight);
+    const AABB bbox3 = computeAABB(splitIdxRight, primEnd);
 
     // ノードの作成
     const AABB childboxes[4] = {bbox0, bbox1, bbox2, bbox3};
@@ -176,28 +160,28 @@ class QBVH {
     nodes[parentOffset].child[0] = child1Offset;
 
     // 子ノード1の部分木を配列に追加していく
-    buildBVHNode(primStart, splitIdxLeft, bboxes, primIndices);
+    buildBVHNode(primStart, splitIdxLeft);
 
     // 子ノード2へのオフセットを計算し, 親ノードにセットする
     const int child2Offset = nodes.size();
     nodes[parentOffset].child[1] = child2Offset;
 
     // 子ノード2の部分木を配列に追加していく
-    buildBVHNode(splitIdxLeft, splitIdxTop, bboxes, primIndices);
+    buildBVHNode(splitIdxLeft, splitIdxTop);
 
     // 子ノード3へのオフセットを計算し, 親ノードにセットする
     const int child3Offset = nodes.size();
     nodes[parentOffset].child[2] = child3Offset;
 
     // 子ノード3の部分木を配列に追加していく
-    buildBVHNode(splitIdxTop, splitIdxRight, bboxes, primIndices);
+    buildBVHNode(splitIdxTop, splitIdxRight);
 
     // 子ノード4へのオフセットを計算し, 親ノードにセットする
     const int child4Offset = nodes.size();
     nodes[parentOffset].child[3] = child4Offset;
 
     // 子ノード4の部分木を配列に追加していく
-    buildBVHNode(splitIdxRight, primEnd, bboxes, primIndices);
+    buildBVHNode(splitIdxRight, primEnd);
   }
 
   // SIMDでray-box intersectionを行う
@@ -252,12 +236,8 @@ class QBVH {
       bboxes.push_back(prim.calcAABB());
     }
 
-    // 各Primitiveへのインデックスを表す配列を作成
-    primIndices.resize(primitives.size());
-    std::iota(primIndices.begin(), primIndices.end(), 0);
-
     // BVHの構築をルートノードから開始
-    buildBVHNode(0, primitives.size(), bboxes, primIndices);
+    buildBVHNode(0, primitives.size());
 
     // 総ノード数を計算
     stats.nNodes = stats.nInternalNodes + stats.nLeafNodes;
