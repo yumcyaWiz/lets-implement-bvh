@@ -17,13 +17,9 @@ class QBVH {
   // ノードを表す構造体
   // NOTE: 128ByteにAlignmentすることでキャッシュ効率を良くする
   struct alignas(128) BVHNode {
-    // バウンディングボックス(子ノード4つ分)
-    float xmin[4];
-    float xmax[4];
-    float ymin[4];
-    float ymax[4];
-    float zmin[4];
-    float zmax[4];
+    float bounds[4 * 2 *
+                 3];  // バウンディングボックス(子ノード4つ分) [minX,
+                      // minX, minX, minX, minY, minY, minY, minY, minZ, ...]
     int child
         [4];  // 子ノードへのインデックス(先頭1bitで葉ノードかどうかを表し、残り4bitにPrimitive数,
               // 残り27bitにprimIndicesへのオフセット)
@@ -143,12 +139,12 @@ class QBVH {
     const AABB childboxes[4] = {bbox0, bbox1, bbox2, bbox3};
     BVHNode node;
     for (int i = 0; i < 4; ++i) {
-      node.xmin[i] = childboxes[i].bounds[0][0];
-      node.xmax[i] = childboxes[i].bounds[1][0];
-      node.ymin[i] = childboxes[i].bounds[0][1];
-      node.ymax[i] = childboxes[i].bounds[1][1];
-      node.zmin[i] = childboxes[i].bounds[0][2];
-      node.zmax[i] = childboxes[i].bounds[1][2];
+      node.bounds[i] = childboxes[i].bounds[0][0];
+      node.bounds[i + 4] = childboxes[i].bounds[0][1];
+      node.bounds[i + 8] = childboxes[i].bounds[0][2];
+      node.bounds[i + 12] = childboxes[i].bounds[1][0];
+      node.bounds[i + 16] = childboxes[i].bounds[1][1];
+      node.bounds[i + 20] = childboxes[i].bounds[1][2];
     }
     node.axisTop = splitAxisTop;
     node.axisLeft = splitAxisLeft;
@@ -278,15 +274,16 @@ class QBVH {
   AABB rootAABB() const {
     if (nodes.size() > 0) {
       const BVHNode& root = nodes[0];
-      const AABB bbox1 = AABB(Vec3(root.xmin[0], root.ymin[0], root.zmin[0]),
-                              Vec3(root.xmax[0], root.ymax[0], root.zmax[0]));
-      const AABB bbox2 = AABB(Vec3(root.xmin[1], root.ymin[1], root.zmin[1]),
-                              Vec3(root.xmax[1], root.ymax[1], root.zmax[1]));
-      const AABB bbox3 = AABB(Vec3(root.xmin[2], root.ymin[2], root.zmin[2]),
-                              Vec3(root.xmax[2], root.ymax[2], root.zmax[2]));
-      const AABB bbox4 = AABB(Vec3(root.xmin[3], root.ymin[3], root.zmin[3]),
-                              Vec3(root.xmax[3], root.ymax[3], root.zmax[3]));
-      return mergeAABB(bbox1, mergeAABB(bbox2, mergeAABB(bbox3, bbox4)));
+
+      AABB bboxes[4];
+      for (int i = 0; i < 4; ++i) {
+        bboxes[i] =
+            AABB(Vec3(root.bounds[i], root.bounds[i + 4], root.bounds[i + 8]),
+                 Vec3(root.bounds[i + 12], root.bounds[i + 16],
+                      root.bounds[i + 20]));
+      }
+      return mergeAABB(bboxes[0],
+                       mergeAABB(bboxes[1], mergeAABB(bboxes[2], bboxes[3])));
     } else {
       return AABB();
     }
