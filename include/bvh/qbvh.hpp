@@ -215,8 +215,19 @@ class QBVH {
   }
 
   // 再帰的にBVHのtraverseを行う
-  bool intersectNode(int nodeIdx, const Ray& ray, const Vec3& dirInv,
-                     const int dirInvSign[3], IntersectInfo& info) const {
+  bool intersectNode(int nodeIdx, const __m128 orig[3], const __m128 dirInv[3],
+                     const int dirInvSign[3], const __m128 raytmin,
+                     __m128 raytmax, IntersectInfo& info) const {
+    const BVHNode& node = nodes[nodeIdx];
+    const __m128 bounds[2][3] = {
+        {_mm_load_ps(&node.bounds[0]), _mm_load_ps(&node.bounds[4]),
+         _mm_load_ps(&node.bounds[8])},
+        {_mm_load_ps(&node.bounds[12]), _mm_load_ps(&node.bounds[16]),
+         _mm_load_ps(&node.bounds[20])}};
+
+    if (intersectAABB(orig, dirInv, dirInvSign, raytmin, raytmax, bounds)) {
+      return true;
+    }
     return false;
   }
 
@@ -277,7 +288,16 @@ class QBVH {
     for (int i = 0; i < 3; ++i) {
       dirInvSign[i] = dirInv[i] > 0 ? 0 : 1;
     }
-    return intersectNode(0, ray, dirInv, dirInvSign, info);
+
+    const __m128 orig[3] = {_mm_set_ps1(ray.origin[0]),
+                            _mm_set_ps1(ray.origin[1]),
+                            _mm_set_ps1(ray.origin[2])};
+    const __m128 _dirInv[3] = {_mm_set_ps1(dirInv[0]), _mm_set_ps1(dirInv[1]),
+                               _mm_set_ps1(dirInv[2])};
+    const __m128 raytmin = _mm_set_ps1(ray.tmin);
+    __m128 raytmax = _mm_set_ps1(ray.tmax);
+
+    return intersectNode(0, orig, _dirInv, dirInvSign, raytmin, raytmax, info);
   }
 };
 
